@@ -6,8 +6,8 @@ import { Env, ChatMessage } from "./types";
 
 // === 모델 ID들 ===
 const MODEL_DEFAULT = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const MODEL_GPT120B = "@cf/openai/gpt-oss-20b"; // 예시
-const MODEL_LLM3_2_3B = "@cf/meta/llama-3.2-3b-instruct";  // 예시
+const MODEL_GPT20B = "@cf/openai/gpt-oss-20b";
+const MODEL_LLM3_2_3B = "@cf/meta/llama-3.2-3b-instruct";
 
 const SYSTEM_PROMPT =
   "You are a helpful, friendly assistant. Provide concise and accurate responses.";
@@ -27,20 +27,14 @@ export default {
 
     // ==== CORS Preflight 처리 ====
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(),
-      });
+      return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
     // ==== 정적 파일 처리 ====
     if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
       const res = await env.ASSETS.fetch(request);
-
-      // 정적 파일에도 CORS 적용
       const newHeaders = new Headers(res.headers);
       Object.entries(corsHeaders()).forEach(([k, v]) => newHeaders.set(k, v));
-
       return new Response(res.body, { status: res.status, headers: newHeaders });
     }
 
@@ -49,30 +43,21 @@ export default {
       switch (url.pathname) {
         case "/api/chat":
           return handleChatRequest(request, env, MODEL_DEFAULT);
-
-        case "/api/v0/gpt-oss-120b":
-          return handleChatRequest(request, env, MODEL_GPT120B);
-
+        case "/api/v0/gpt-oss-20b":
+          return handleChatRequest(request, env, MODEL_GPT20B);
         case "/api/v0/llm3.2-3b":
           return handleChatRequest(request, env, MODEL_LLM3_2_3B);
-
         default:
-          return new Response("Not found", {
-            status: 404,
-            headers: corsHeaders(),
-          });
+          return new Response("Not found", { status: 404, headers: corsHeaders() });
       }
     }
 
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: corsHeaders(),
-    });
+    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders() });
   },
 } satisfies ExportedHandler<Env>;
 
 // ====================================================
-//   Chat Handler (모든 모델 공통 처리)
+// Chat Handler (모든 모델 공통 처리)
 // ====================================================
 async function handleChatRequest(
   request: Request,
@@ -80,45 +65,50 @@ async function handleChatRequest(
   modelId: string,
 ): Promise<Response> {
   try {
-    const { messages = [] } = (await request.json()) as {
-      messages: ChatMessage[];
-    };
+    const { messages = [] } = (await request.json()) as { messages: ChatMessage[] };
 
-    // 시스템 프롬프트 삽입
-    if (!messages.some((msg) => msg.role === "system")) {
-      messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+    // 시스템 프롬프트 처리
+    let systemPrompt = SYSTEM_PROMPT;
+    if (!messages.some(msg => msg.role === "system")) {
+      messages.unshift({ role: "system", content: systemPrompt });
+    } else {
+      systemPrompt = messages.find(msg => msg.role === "system")!.content;
     }
 
-    // Cloudflare AI 호출
-    const aiResponse = await env.AI.run(
-      modelId,
-      {
-        messages,
+    // GPT-OSS 계열이면 instructions + input
+    let payload: any = {};
+    if (modelId.startsWith("@cf/openai/gpt-oss")) {
+      const userText = messages
+        .filter(m => m.role !== "system")
+        .map(m => m.content)
+        .join("\n");
+      payload = {
+        instructions: systemPrompt,
+        input: userText,
         max_tokens: 1024,
-      },
-      {
-        returnRawResponse: true,
-      },
-    );
+      };
+    } else {
+      // ChatMessage 지원 모델
+      payload = { messages, max_tokens: 1024 };
+    }
 
-    // AI 원시 응답에 CORS 헤더 붙이기
+    const aiResponse = await env.AI.run(modelId, payload, { returnRawResponse: true });
+
     const headers = new Headers(aiResponse.headers);
     Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
 
-    return new Response(aiResponse.body, {
-      status: aiResponse.status,
-      headers,
-    });
-
+    return new Response(aiResponse.body, { status: aiResponse.status, headers });
   } catch (err) {
     console.error("Error:", err);
-
-    return new Response(JSON.stringify({ error: "Failed to process request" }), {
-      status: 500,
-      headers: {
-        ...corsHeaders(),
-        "Content-Type": "application/json",
-      },
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Failed to process request",
+        detail: err instanceof Error ? err.message : JSON.stringify(err),
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+      }
+    );
   }
 }
