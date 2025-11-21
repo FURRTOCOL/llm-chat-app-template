@@ -6,7 +6,7 @@ import { Env, ChatMessage } from "./types";
 
 // === 모델 ID들 ===
 const MODEL_DEFAULT = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const MODEL_GPT120B = "@cf/openai/gpt-oss-120b"; // 예시
+const MODEL_GPT120B = "@cf/openai/gpt-oss-20b"; // 예시
 const MODEL_LLM3_2_3B = "@cf/meta/llama-3.2-3b-instruct";  // 예시
 
 const SYSTEM_PROMPT =
