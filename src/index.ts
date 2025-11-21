@@ -1,99 +1,86 @@
 /**
- * LLM Chat Application Template
+ * LLM Chat Application Template — Modified with multiple endpoints
  *
- * A simple chat application using Cloudflare Workers AI.
- * This template demonstrates how to implement an LLM-powered chat interface with
- * streaming responses using Server-Sent Events (SSE).
- *
- * @license MIT
+ * Adds:
+ *  - /api/v0/gpt-oss-120b
+ *  - /api/v0/llm3.2-3b
  */
+
 import { Env, ChatMessage } from "./types";
 
-// Model ID for Workers AI model
-// https://developers.cloudflare.com/workers-ai/models/
-const MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+// 원하는 모델들
+const MODEL_GPT120B = "@cf/openai/gpt-oss-120b";   // 예시 모델 ID
+const MODEL_LLM3B = "@cf/meta/llama-3.2-1b-instruct";          // 예시 모델 ID
+const DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
-// Default system prompt
 const SYSTEM_PROMPT =
   "You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
 export default {
-  /**
-   * Main request handler for the Worker
-   */
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Handle static assets (frontend)
+    // Frontend assets
     if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
 
-    // API Routes
-    if (url.pathname === "/api/chat") {
-      // Handle POST requests for chat
-      if (request.method === "POST") {
-        return handleChatRequest(request, env);
-      }
+    // Unified chat POST handler
+    if (request.method === "POST") {
+      switch (url.pathname) {
+        case "/api/chat":
+          return handleChatRequest(request, env, DEFAULT_MODEL);
 
-      // Method not allowed for other request types
-      return new Response("Method not allowed", { status: 405 });
+        case "/api/v0/gpt-oss-120b":          // 추가된 엔드포인트 1
+          return handleChatRequest(request, env, MODEL_GPT120B);
+
+        case "/api/v0/llm3.2-1b":             // 추가된 엔드포인트 2
+          return handleChatRequest(request, env, MODEL_LLM3B);
+
+        default:
+          return new Response("Not found", { status: 404 });
+      }
     }
 
-    // Handle 404 for unmatched routes
-    return new Response("Not found", { status: 404 });
+    return new Response("Method not allowed", { status: 405 });
   },
 } satisfies ExportedHandler<Env>;
 
-/**
- * Handles chat API requests
- */
+
+// ================================
+//   Chat Handler
+// ================================
 async function handleChatRequest(
   request: Request,
   env: Env,
+  modelId: string,
 ): Promise<Response> {
   try {
-    // Parse JSON request body
     const { messages = [] } = (await request.json()) as {
       messages: ChatMessage[];
     };
 
-    // Add system prompt if not present
     if (!messages.some((msg) => msg.role === "system")) {
       messages.unshift({ role: "system", content: SYSTEM_PROMPT });
     }
 
     const response = await env.AI.run(
-      MODEL_ID,
+      modelId,
       {
         messages,
         max_tokens: 1024,
       },
       {
         returnRawResponse: true,
-        // Uncomment to use AI Gateway
-        // gateway: {
-        //   id: "YOUR_GATEWAY_ID", // Replace with your AI Gateway ID
-        //   skipCache: false,      // Set to true to bypass cache
-        //   cacheTtl: 3600,        // Cache time-to-live in seconds
-        // },
       },
     );
 
-    // Return streaming response
     return response;
   } catch (error) {
     console.error("Error processing chat request:", error);
     return new Response(
       JSON.stringify({ error: "Failed to process request" }),
-      {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      },
+      { status: 500, headers: { "content-type": "application/json" } },
     );
   }
 }
